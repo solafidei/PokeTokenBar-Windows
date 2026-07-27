@@ -6,8 +6,8 @@
 
 **Your AI coding tokens, hatched into Pokémon — right in your menu bar.**
 
-[![Release](https://img.shields.io/github/v/release/chattymin/PokeTokenBar?color=444d56&label=release)](https://github.com/chattymin/PokeTokenBar/releases)
-[![macOS](https://img.shields.io/badge/macOS-14%2B-0969da)](https://www.apple.com/macos/)
+[![Release](https://img.shields.io/github/v/release/ssoyasamsam/PokeTokenBar-Windows?color=444d56&label=release)](https://github.com/ssoyasamsam/PokeTokenBar-Windows/releases)
+[![Windows](https://img.shields.io/badge/Windows-10%2B-0078d4)](https://www.microsoft.com/windows/)
 [![Swift](https://img.shields.io/badge/Swift-6-f05138)](https://swift.org)
 [![Homebrew](https://img.shields.io/badge/Homebrew-cask-8957e5)](#homebrew)
 [![License](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
@@ -16,6 +16,8 @@
 **English** · [한국어](README.ko.md) · [日本語](README.ja.md)
 
 </div>
+
+> **This is an independent Windows-only fork of [chattymin/PokeTokenBar](https://github.com/chattymin/PokeTokenBar).** The Windows system-tray port was originally submitted as [PR #114](https://github.com/chattymin/PokeTokenBar/pull/114) to the upstream project but wasn't merged (solo-maintainer bandwidth for a second native platform), so it lives here instead. All credit for the original macOS app, the Pokémon companion concept, and most of the codebase goes to the upstream project — this fork exists to keep shipping Windows builds independently.
 
 PokeTokenBar turns the AI coding tokens you're already burning — Claude Code, Codex, Gemini CLI, OpenCode & Hermes Agent — into a growing **Pokémon companion** in your macOS menu bar. Spend tokens, hatch an egg, evolve it through its real evolution line, graduate it into your Pokédex, and start again. Underneath the companion it's a precise usage tracker — today's spend, cost, and official 5-hour / weekly limits, read straight from your local logs.
 
