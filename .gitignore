@@ -5,6 +5,7 @@ Package.resolved
 
 # App bundle build output
 build/
+installer/out/
 
 # OMC / agent local state
 .omc/
