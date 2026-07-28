@@ -1,5 +1,6 @@
 #if os(Windows)
 import Foundation
+import WinSDK
 
 /// Optional: mirror the current companion/usage report into an Obsidian vault note.
 ///
@@ -25,6 +26,21 @@ enum WindowsObsidianExport {
         return URL(fileURLWithPath: path)
     }
 
+    /// swift-corelibs-foundation on Windows doesn't resolve `TimeZone.current`/`.autoupdatingCurrent`
+    /// from the system settings (observed: always reports UTC), so read the offset straight from the
+    /// Win32 API instead of trusting Foundation's timezone detection.
+    private static func windowsLocalTimeZone() -> TimeZone {
+        var tzi = TIME_ZONE_INFORMATION()
+        let bias: Int32
+        switch GetTimeZoneInformation(&tzi) {
+        case DWORD(TIME_ZONE_ID_DAYLIGHT):
+            bias = tzi.Bias + tzi.DaylightBias
+        default:
+            bias = tzi.Bias + tzi.StandardBias
+        }
+        return TimeZone(secondsFromGMT: Int(-bias) * 60) ?? .current
+    }
+
     /// 10-block text progress bar, e.g. "██████░░░░ 62%" — no image/plugin needed, renders in any
     /// Markdown viewer.
     private static func progressBar(_ fraction: Double) -> String {
@@ -42,6 +58,7 @@ enum WindowsObsidianExport {
         guard let folder = vaultFolder else { return }
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        fmt.timeZone = windowsLocalTimeZone()
 
         var imageLine = ""
         if let spritePNG {
