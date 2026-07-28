@@ -6,7 +6,7 @@
 
 **Your AI coding tokens, hatched into Pokémon — right in your menu bar.**
 
-[![Release](https://img.shields.io/github/v/release/ssoyasamsam/PokeTokenBar-Windows?color=444d56&label=release)](https://github.com/ssoyasamsam/PokeTokenBar-Windows/releases)
+[![Release](https://img.shields.io/github/v/release/ssoyanamnam/PokeTokenBar-Windows?color=444d56&label=release)](https://github.com/ssoyanamnam/PokeTokenBar-Windows/releases)
 [![Windows](https://img.shields.io/badge/Windows-10%2B-0078d4)](https://www.microsoft.com/windows/)
 [![Swift](https://img.shields.io/badge/Swift-6-f05138)](https://swift.org)
 [![Homebrew](https://img.shields.io/badge/Homebrew-cask-8957e5)](#homebrew)
