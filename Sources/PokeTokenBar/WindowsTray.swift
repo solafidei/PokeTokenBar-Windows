@@ -308,6 +308,15 @@ enum WindowsTray {
             if let alert { pendingAlert = alert }
         }
         if let sinkHwnd { _ = PostMessageW(sinkHwnd, updateMessage, 0, 0) }
+        let spritePNG: Data?
+        if disp.isEgg {
+            spritePNG = await SpriteStore.shared.eggData()
+        } else if let id = disp.speciesID {
+            spritePNG = await SpriteStore.shared.data(speciesID: id, animated: false, shiny: disp.isShiny)
+        } else {
+            spritePNG = nil
+        }
+        WindowsObsidianExport.write(statusLine: companionStatusLine(disp), progress: disp.progress, spritePNG: spritePNG, report: report)
 
         // Background release check — long throttle (the timer path), with a Windows toast on detection.
         // Opening the popover checks with no throttle but WITHOUT a toast (see togglePopup) — the banner
@@ -575,6 +584,27 @@ enum WindowsTray {
         }
     }
 
+    // Windows denies SetForegroundWindow to a process that isn't itself the current foreground
+    // process (the "foreground lock" — MSDN: SetForegroundWindow). A tray-icon click is delivered
+    // to *our* hidden sink window, not to whatever the user was just looking at, so the plain call
+    // is reliably denied here; the popup then shows for an instant and gets WM_ACTIVATE/WA_INACTIVE
+    // immediately, which the popup's own handler treats as "user clicked away" and hides again —
+    // net effect: the popup never visibly appears. Fix: temporarily attach our input queue to the
+    // real foreground thread's, which is the documented way to borrow foreground rights without
+    // synthetic key injection.
+    private static func forceForeground(_ hwnd: HWND) {
+        let fg = GetForegroundWindow()
+        let fgThread = fg.flatMap { GetWindowThreadProcessId($0, nil) } ?? 0
+        let thisThread = GetCurrentThreadId()
+        if fgThread != 0, fgThread != thisThread {
+            _ = AttachThreadInput(thisThread, fgThread, true)
+            _ = SetForegroundWindow(hwnd)
+            _ = AttachThreadInput(thisThread, fgThread, false)
+        } else {
+            _ = SetForegroundWindow(hwnd)
+        }
+    }
+
     private static func togglePopup() {
         guard let popupHwnd else { return }
         if IsWindowVisible(popupHwnd) { _ = ShowWindow(popupHwnd, SW_HIDE); return }
@@ -585,7 +615,7 @@ enum WindowsTray {
         let x = stayVisible ? 40 : wa.right - popupWidth - 8
         let y = stayVisible ? 40 : wa.bottom - h - 8
         _ = SetWindowPos(popupHwnd, HWND(bitPattern: -1), x, y, popupWidth, h, UINT(SWP_SHOWWINDOW))
-        SetForegroundWindow(popupHwnd)
+        forceForeground(popupHwnd)
         checkForUpdate(minInterval: 0, toast: false)   // opening the popover always re-checks (no toast)
         scheduleRefresh()
         InvalidateRect(popupHwnd, nil, true)
