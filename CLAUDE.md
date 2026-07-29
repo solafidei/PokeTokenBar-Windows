@@ -142,3 +142,17 @@
   (팝오버 `popoverDidClose` 패턴). 회귀 가드: `FloatingPetEnergyTests`(fps 하한 clamp·`frameFloor>0`·팝오버 불변·
   low-power 정적화 순수 판정 — SwiftUI `.task` 타이밍 자체는 호스트 없이 xctest 불가라 순수 경로만 잠금). occlusion 게이팅은
   all-spaces/`.floating` 펫이 실제로 거의 안 가려져 메뉴바와 동일 수확체감으로 미도입. (#102 리뷰 지적 반영, 2026-07-22.)
+- **`AttachThreadInput` 기반 foreground 탈취는 elevated 프로세스 앞에서 조용히 실패한다(Windows).**
+  `WindowsTray.forceForeground`(트레이 아이콘 클릭 → 팝오버 표시)는 foreground lock 을 우회하려고
+  `AttachThreadInput` 으로 현재 foreground 스레드에 입력 큐를 붙이는데, 그 foreground 창이 관리자
+  권한(elevated) 프로세스 소유면 UIPI 가 attach 자체를 막는다 — 반환값을 안 보므로 실패해도 그냥
+  다음 줄 `SetForegroundWindow` 를 호출하고 그것도 같은 이유로 실패한다. 그 결과 팝업은 `SW_SHOW` 로는
+  뜨지만 진짜 foreground 를 못 얻어 곧바로 따라오는 `WM_ACTIVATE(WA_INACTIVE)` 에 자기 자신을 숨겨버림
+  — "몇 번을 눌러도 안 뜬다"는 리포트가 나오지만 재현이 **클릭 순간 사용자 화면에 떠 있는 다른 창이
+  elevated 인지 아닌지에 좌우**돼 일관되게 재현이 안 된다(사용자 컴퓨터마다, 순간마다 다름). 수정:
+  `togglePopup()` 이 띄운 시각(`popupShownAt`)을 기록해두고, `popupProc` 의 `WA_INACTIVE` 핸들러가 그
+  시각으로부터 ~0.3s 이내의 deactivate 는 무시하도록 유예를 둬서, foreground 탈취가 조용히 실패해도
+  최소한 화면엔 계속 보이게 한다(진짜 클릭-바깥-닫기는 유예 이후 그대로 동작). elevated 창 자체에
+  진짜 활성화 포커스를 뺏어오는 건 UIPI 특성상 불가능 — 표시 유지가 현실적 최선. (2026-07-28, 코드
+  수정 완료·XCTest 로는 재현 불가 — 실제 Win32 메시지 루프+elevated 창 조합이 필요해 회귀 테스트는
+  생략하고 이 항목으로만 캡처.)

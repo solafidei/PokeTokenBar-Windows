@@ -41,7 +41,6 @@ enum WindowsTray {
     nonisolated(unsafe) private static var animSpeciesKey: String?      // which species' animation is loaded
     nonisolated(unsafe) private static var pendingAnim: [HICON]?        // bg → UI handoff (lock)
     nonisolated(unsafe) private static var pendingAnimKey: String?
-    nonisolated(unsafe) private static var reportLines: [String] = ["Loading…"]
     nonisolated(unsafe) private static var currentDisplay = CompanionDisplay()
     nonisolated(unsafe) private static var currentUsage = UsageSnapshot()
     // Last successful Claude limit % — retained so a transient fetch failure (429 rate-limit, network)
@@ -72,6 +71,8 @@ enum WindowsTray {
     nonisolated(unsafe) private static var pendingAlert: String?
     nonisolated(unsafe) private static var refreshing = false
     nonisolated(unsafe) private static var stayVisible = false
+    // Guards the auto-hide-on-deactivate handler right after opening — see togglePopup().
+    nonisolated(unsafe) private static var popupShownAt: Date?
     nonisolated(unsafe) private static var lastAlertTier = 0
 
     // MARK: Entry (main thread — Win32 message loop)
@@ -183,7 +184,6 @@ enum WindowsTray {
         let disp = await companion.windowsDisplay   // Sendable snapshot (single actor hop)
 
         var claude5h: Int?, claude7d: Int?
-        let codexPct: Int? = nil
         // Throttle the oauth/usage fetch to ≥25s apart. Every user action (buy/use/language change)
         // calls scheduleRefresh, so without this a burst of clicks would hammer the endpoint and trip
         // its 429 rate-limit. The 30s poll timer still refetches each tick; action-driven refreshes
@@ -296,27 +296,30 @@ enum WindowsTray {
         us.hermesToday = het?.totalTokens ?? 0; us.hermesCost = het?.totalCost ?? 0
 
         let tip = buildTip(disp: disp, claude: claude, claude5h: claude5h, claude7d: claude7d)
-        let report = buildReport(disp: disp, claude: claude, codex: codex, gemini: gemini,
-                                 opencode: opencode, hermes: hermes,
-                                 now: now, fmt: fmt, weekStart: weekStart, monthStart: monthStart,
-                                 claude5h: claude5h, claude7d: claude7d, codexPct: codexPct)
         let alert = limitAlert(claude7d)
 
         lock.withLock {
-            pendingTip = tip; reportLines = report; currentDisplay = disp; currentUsage = us
+            pendingTip = tip; currentDisplay = disp; currentUsage = us
             if icon != nil { pendingIcon = icon }
             if let alert { pendingAlert = alert }
         }
         if let sinkHwnd { _ = PostMessageW(sinkHwnd, updateMessage, 0, 0) }
-        let spritePNG: Data?
+        // Eggs never animate (no animated egg GIF exists — same rule the tray icon's own animFrames
+        // fetch above follows), so the export gets the static egg PNG. A hatched companion prefers its
+        // animated GIF (the same PokeAPI asset the tray icon frames are decoded from) so the Obsidian
+        // note shows the same idle motion as the popover/tray icon; fall back to the static sprite if
+        // no animated asset exists for that species.
+        var spriteData: Data?; var spriteIsGIF = false
         if disp.isEgg {
-            spritePNG = await SpriteStore.shared.eggData()
+            spriteData = await SpriteStore.shared.eggData()
         } else if let id = disp.speciesID {
-            spritePNG = await SpriteStore.shared.data(speciesID: id, animated: false, shiny: disp.isShiny)
-        } else {
-            spritePNG = nil
+            if let gif = await SpriteStore.shared.data(speciesID: id, animated: true, shiny: disp.isShiny) {
+                spriteData = gif; spriteIsGIF = true
+            } else {
+                spriteData = await SpriteStore.shared.data(speciesID: id, animated: false, shiny: disp.isShiny)
+            }
         }
-        WindowsObsidianExport.write(statusLine: companionStatusLine(disp), progress: disp.progress, spritePNG: spritePNG, report: report)
+        WindowsObsidianExport.write(disp: disp, usage: us, spriteData: spriteData, spriteIsGIF: spriteIsGIF)
 
         // Background release check — long throttle (the timer path), with a Windows toast on detection.
         // Opening the popover checks with no throttle but WITHOUT a toast (see togglePopup) — the banner
@@ -423,43 +426,6 @@ enum WindowsTray {
         return d.isFinalStage ? "\(d.displayName)\(stage)"
                               : "\(d.displayName)\(stage) — \(TokenFormatter.compact(d.tokensToNext)) to evolve"
     }
-
-    private static func buildReport(disp d: CompanionDisplay, claude: [LocalUsageReader.Entry],
-                                    codex: [LocalUsageReader.Entry], gemini: [LocalUsageReader.Entry],
-                                    opencode: [LocalUsageReader.Entry], hermes: [LocalUsageReader.Entry],
-                                    now: Date, fmt: DateFormatter, weekStart: Date, monthStart: Date,
-                                    claude5h: Int?, claude7d: Int?, codexPct: Int?) -> [String] {
-        var lines: [String] = []   // usage + limits only; the Home view draws the companion card itself
-        func block(_ name: String, _ entries: [LocalUsageReader.Entry], showCost: Bool) {
-            let month = LocalUsageReader.period(entries: entries, periodKey: "m",
-                fromDay: fmt.string(from: monthStart), toDay: fmt.string(from: now))
-            guard month.totalTokens > 0 else { return }
-            let today = LocalUsageReader.daily(entries: entries, localDay: LocalUsageReader.todayKey())
-            let week = LocalUsageReader.period(entries: entries, periodKey: "w",
-                fromDay: fmt.string(from: weekStart), toDay: fmt.string(from: now))
-            lines.append(name)
-            lines.append("  today \(pad(TokenFormatter.compact(today?.totalTokens ?? 0)))"
-                       + "  week \(pad(TokenFormatter.compact(week.totalTokens)))"
-                       + "  month \(pad(TokenFormatter.compact(month.totalTokens)))")
-            if showCost { lines.append("  cost  \(TokenFormatter.cost(month.totalCost)) / month") }
-            lines.append("")
-        }
-        block("Claude Code", claude, showCost: true)
-        block("Codex", codex, showCost: false)
-        block("Gemini", gemini, showCost: true)
-        block("OpenCode", opencode, showCost: true)
-        block("Hermes Agent", hermes, showCost: true)
-        if claude5h != nil || claude7d != nil {
-            lines.append("Claude limits")
-            if let u = claude5h { lines.append("  5-hour  \(u)%") }
-            if let u = claude7d { lines.append("  7-day   \(u)%") }
-            lines.append("")
-        }
-        if let p = codexPct { lines.append("Codex limit  \(p)%") }
-        return lines
-    }
-
-    private static func pad(_ s: String) -> String { s.padding(toLength: 7, withPad: " ", startingAt: 0) }
 
     /// Localize a UI string to the current companion language (uiLang set each paint).
     private static func L(_ ko: String, _ en: String, _ ja: String) -> String {
@@ -615,6 +581,7 @@ enum WindowsTray {
         let x = stayVisible ? 40 : wa.right - popupWidth - 8
         let y = stayVisible ? 40 : wa.bottom - h - 8
         _ = SetWindowPos(popupHwnd, HWND(bitPattern: -1), x, y, popupWidth, h, UINT(SWP_SHOWWINDOW))
+        popupShownAt = Date()
         forceForeground(popupHwnd)
         checkForUpdate(minInterval: 0, toast: false)   // opening the popover always re-checks (no toast)
         scheduleRefresh()
@@ -1614,7 +1581,14 @@ enum WindowsTray {
             return 0
         case UINT(WM_ACTIVATE):
             if (wParam & 0xFFFF) == WA_INACTIVE, !WindowsTray.stayVisible, let h = WindowsTray.popupHwnd {
-                _ = ShowWindow(h, SW_HIDE)
+                // forceForeground() can silently fail to borrow foreground rights when the currently
+                // active window belongs to an elevated (higher-integrity) process — AttachThreadInput
+                // is denied by UIPI in that case, so the popup opens without ever truly activating and
+                // this WA_INACTIVE arrives immediately, hiding it before the user sees anything. Absorb
+                // that spurious deactivate for a brief window right after showing; genuine click-away
+                // dismissal still works once the grace period has passed.
+                let justShown = WindowsTray.popupShownAt.map { Date().timeIntervalSince($0) < 0.3 } ?? false
+                if !justShown { _ = ShowWindow(h, SW_HIDE) }
             }
             return 0
         case UINT(WM_CLOSE):
