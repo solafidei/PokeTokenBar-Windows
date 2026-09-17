@@ -51,28 +51,36 @@ struct PTBWindowsCLI {
 
         print("PokeTokenBar — Windows CLI")
         print("home: \(FileManager.default.homeDirectoryForCurrentUser.path)")
+        // The first thing to check when a WSL user sees zeros: did we find the Linux home?
+        let wsl = UsageRoots.wslHomes
+        print("wsl:  " + (wsl.isEmpty ? "none detected (set PTB_WSL_HOME to override)"
+                                      : wsl.map(\.path).joined(separator: ", ")))
         print(String(repeating: "=", count: 52))
 
-        report("Claude", dir: LocalUsageReader.claudeProjectsDir,
-               entries: LocalUsageReader.claudeEntries(modifiedSince: monthStart),
+        // Every provider scans the same roots the tray does. Reporting only the Windows home
+        // here would print "(not found)" directly under the `wsl:` line above — the diagnostic
+        // contradicting itself for exactly the users it was added for.
+        let claudeRoots = LocalUsageReader.claudeProjectsRoots
+        report("Claude", dirs: claudeRoots,
+               entries: claudeRoots.flatMap { LocalUsageReader.claudeEntries(modifiedSince: monthStart, root: $0) },
                now: now, fmt: fmt, weekStart: weekStart, monthStart: monthStart)
-        report("Codex", dir: LocalUsageReader.codexSessionsDir,
-               entries: LocalUsageReader.codexEntries(modifiedSince: monthStart),
+        let codexRoots = LocalUsageReader.codexSessionsRoots
+        report("Codex", dirs: codexRoots,
+               entries: codexRoots.flatMap { LocalUsageReader.codexEntries(modifiedSince: monthStart, root: $0) },
                now: now, fmt: fmt, weekStart: weekStart, monthStart: monthStart)
-        report("Gemini", dir: LocalUsageReader.geminiTmpDir,
-               entries: LocalUsageReader.geminiEntries(modifiedSince: monthStart),
+        let geminiRoots = LocalUsageReader.geminiTmpRoots
+        report("Gemini", dirs: geminiRoots,
+               entries: geminiRoots.flatMap { LocalUsageReader.geminiEntries(modifiedSince: monthStart, root: $0) },
                now: now, fmt: fmt, weekStart: weekStart, monthStart: monthStart)
         // OpenCode/Hermes read local SQLite DBs — only where a SQLite module is importable
         // (system SQLite3 on macOS, vendored CSQLite on Windows).
         #if canImport(SQLite3) || canImport(CSQLite)
-        let ocRoot = LocalAdditionalUsageReader.defaultOpenCodeRoots.first
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode")
-        report("OpenCode", dir: ocRoot,
+        let ocRoots = LocalAdditionalUsageReader.defaultOpenCodeRoots
+        report("OpenCode", dirs: ocRoots,
                entries: LocalAdditionalUsageReader.openCodeEntries(modifiedSince: monthStart),
                now: now, fmt: fmt, weekStart: weekStart, monthStart: monthStart)
-        let hermesRoot = ProcessInfo.processInfo.environment["HERMES_HOME"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".hermes")
-        report("Hermes", dir: hermesRoot,
+        let hermesRoots = LocalAdditionalUsageReader.defaultHermesRoots
+        report("Hermes", dirs: hermesRoots,
                entries: LocalAdditionalUsageReader.hermesEntries(modifiedSince: monthStart),
                now: now, fmt: fmt, weekStart: weekStart, monthStart: monthStart)
         #endif
@@ -133,10 +141,11 @@ struct PTBWindowsCLI {
     }
 
     /// Print one provider's today/week/month totals from its parsed entries.
-    private static func report(_ name: String, dir: URL, entries: [LocalUsageReader.Entry],
+    private static func report(_ name: String, dirs: [URL], entries: [LocalUsageReader.Entry],
                                now: Date, fmt: DateFormatter, weekStart: Date, monthStart: Date) {
-        print("\n[\(name)]  \(dir.path)")
-        guard FileManager.default.fileExists(atPath: dir.path) else {
+        print("\n[\(name)]  \(dirs.map(\.path).joined(separator: "  |  "))")
+        // Present if ANY root exists — a WSL-only user has no Windows-side directory at all.
+        guard dirs.contains(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
             print("  (not found — CLI not installed or unused on this machine)")
             return
         }

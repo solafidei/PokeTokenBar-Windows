@@ -49,17 +49,30 @@ enum LocalUsageReader {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/tmp")
     }
 
+    // Multi-root variants: Windows home + any detected WSL home (see UsageRoots). The single-dir
+    // properties above stay for diagnostics and direct single-root calls.
+    static var claudeProjectsRoots: [URL] { UsageRoots.all(".claude/projects") }
+    static var codexSessionsRoots: [URL] { UsageRoots.all(".codex/sessions") }
+    static var geminiTmpRoots: [URL] { UsageRoots.all(".gemini/tmp") }
+
     // MARK: 스캔 (mtime 윈도우)
 
     /// `root` 하위(재귀)의 `.jsonl` 파일 중 `modifiedSince` 이후 수정된 것.
     static func jsonlFiles(in root: URL, modifiedSince: Date, allowJSON: Bool = false) -> [URL] {
         let fm = FileManager.default
-        guard let en = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]) else { return [] }
+        // WSL roots are UNC and the URL enumerator reads them as empty — walk those by path.
+        let files: [URL]
+        if UsageRoots.isUNC(root) {
+            files = UsageRoots.walk(root)
+        } else {
+            guard let en = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]) else { return [] }
+            files = en.compactMap { $0 as? URL }
+        }
         var out: [URL] = []
-        for case let url as URL in en {
+        for url in files {
             // 기본 .jsonl. .json 은 Gemini 전용(allowJSON) — Claude 루트 .meta.json 스캔 방지.
             guard url.pathExtension == "jsonl" || (allowJSON && url.pathExtension == "json") else { continue }
             let v = try? url.resourceValues(forKeys: [.contentModificationDateKey])

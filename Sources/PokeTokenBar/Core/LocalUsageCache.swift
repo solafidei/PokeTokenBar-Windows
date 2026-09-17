@@ -62,7 +62,8 @@ actor LocalUsageCache {
     func claudeEntries(modifiedSince: Date) -> [LocalUsageReader.Entry] {
         ensureLoaded()
         let fmt = LocalUsageReader.localDayFormatter()
-        let all = collect(root: claudeRoot ?? LocalUsageReader.claudeProjectsDir, since: modifiedSince, cache: &claudeCache) {
+        let all = collect(roots: claudeRoot.map { [$0] } ?? LocalUsageReader.claudeProjectsRoots,
+                          since: modifiedSince, cache: &claudeCache) {
             LocalUsageReader.parseClaudeFile($0, fmt: fmt)
         }
         saveIfNeeded()
@@ -72,7 +73,8 @@ actor LocalUsageCache {
     func codexEntries(modifiedSince: Date) -> [LocalUsageReader.Entry] {
         ensureLoaded()
         let fmt = LocalUsageReader.localDayFormatter()
-        let r = collect(root: codexRoot ?? LocalUsageReader.codexSessionsDir, since: modifiedSince, cache: &codexCache) {
+        let r = collect(roots: codexRoot.map { [$0] } ?? LocalUsageReader.codexSessionsRoots,
+                        since: modifiedSince, cache: &codexCache) {
             LocalUsageReader.parseCodexFile($0, fmt: fmt)
         }
         saveIfNeeded()
@@ -82,7 +84,7 @@ actor LocalUsageCache {
     func geminiEntries(modifiedSince: Date) -> [LocalUsageReader.Entry] {
         ensureLoaded()
         let fmt = LocalUsageReader.localDayFormatter()
-        let r = collect(root: geminiRoot ?? LocalUsageReader.geminiTmpDir, since: modifiedSince,
+        let r = collect(roots: geminiRoot.map { [$0] } ?? LocalUsageReader.geminiTmpRoots, since: modifiedSince,
                         cache: &geminiCache, allowJSON: true) {
             LocalUsageReader.parseGeminiFile($0, fmt: fmt)
         }
@@ -90,30 +92,42 @@ actor LocalUsageCache {
         return r
     }
 
-    private func collect(root: URL, since: Date, cache: inout [String: Blob],
+    /// Scans every root in order. The cache is keyed by absolute path, so Windows and WSL roots
+    /// share one dictionary without colliding. A root that cannot be enumerated (WSL distro
+    /// stopped, share unavailable) is skipped, not fatal — the others still report.
+    private func collect(roots: [URL], since: Date, cache: inout [String: Blob],
                          allowJSON: Bool = false,
                          parse: (URL) -> [LocalUsageReader.Entry]) -> [LocalUsageReader.Entry] {
         let fm = FileManager.default
-        guard let en = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]) else { return [] }
         var result: [LocalUsageReader.Entry] = []
-        for case let url as URL in en {
-            // 기본 .jsonl. .json 은 Gemini 루트에서만(allowJSON) — Claude 루트의 대량
-            // .meta.json 등을 스캔/빈 blob 으로 캐시하지 않도록 스코프 제한.
-            guard url.pathExtension == "jsonl" || (allowJSON && url.pathExtension == "json") else { continue }
-            guard let v = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
-                  let mtime = v.contentModificationDate, mtime >= since else { continue }
-            let size = v.fileSize ?? 0
-            let key = url.path
-            if let blob = cache[key], blob.mtime == mtime, blob.size == size {
-                result.append(contentsOf: blob.entries)            // 변경 없음 → 재파싱 안 함
+        for root in roots {
+            // WSL roots are UNC and the URL enumerator reads them as empty — walk those by path.
+            let files: [URL]
+            if UsageRoots.isUNC(root) {
+                files = UsageRoots.walk(root)
             } else {
-                let entries = parse(url)
-                cache[key] = Blob(mtime: mtime, size: size, entries: entries)
-                dirty = true
-                result.append(contentsOf: entries)
+                guard let en = fm.enumerator(
+                    at: root,
+                    includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                    options: [.skipsHiddenFiles]) else { continue }
+                files = en.compactMap { $0 as? URL }
+            }
+            for url in files {
+                // 기본 .jsonl. .json 은 Gemini 루트에서만(allowJSON) — Claude 루트의 대량
+                // .meta.json 등을 스캔/빈 blob 으로 캐시하지 않도록 스코프 제한.
+                guard url.pathExtension == "jsonl" || (allowJSON && url.pathExtension == "json") else { continue }
+                guard let v = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let mtime = v.contentModificationDate, mtime >= since else { continue }
+                let size = v.fileSize ?? 0
+                let key = url.path
+                if let blob = cache[key], blob.mtime == mtime, blob.size == size {
+                    result.append(contentsOf: blob.entries)            // 변경 없음 → 재파싱 안 함
+                } else {
+                    let entries = parse(url)
+                    cache[key] = Blob(mtime: mtime, size: size, entries: entries)
+                    dirty = true
+                    result.append(contentsOf: entries)
+                }
             }
         }
         return result

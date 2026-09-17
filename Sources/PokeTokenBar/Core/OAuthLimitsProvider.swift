@@ -133,14 +133,17 @@ private actor OAuthAccessTokenCache {
         cachedCredential = nil
     }
 
+    /// Windows home first, then each detected WSL home — a WSL-only user logged in with Claude
+    /// Code inside the distro, so the Windows-side file never exists and the official 5h/weekly
+    /// limits would stay dead without this. First valid, unexpired credential wins.
     private nonisolated static func readClaudeCredentialsFile() throws -> OAuthCredentialData.Credential? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/.credentials.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        guard let credential = OAuthCredentialData.credential(from: data), !credential.isExpired else {
-            return nil
+        for url in UsageRoots.all(".claude/.credentials.json") {
+            guard let data = try? Data(contentsOf: url),
+                  let credential = OAuthCredentialData.credential(from: data),
+                  !credential.isExpired else { continue }
+            return credential
         }
-        return credential
+        return nil
     }
 
     #if os(macOS)
