@@ -150,6 +150,10 @@ setx PTB_WSL_HOME "\\wsl.localhost\Ubuntu\home\yourname"
 
 Boxes without WSL are unaffected: no distributions are listed, nothing is launched, and behaviour is identical to before. One known gap — the **Codex** limit percentage still needs `codex` installed on the Windows side, because reading it runs the binary; Codex *token counts* from WSL work normally.
 
+**Scanning WSL takes time — the rings start empty.** WSL files are read over the `\\wsl.localhost` 9P share, where a single file stat costs roughly 30 ms, so a scan is dominated by I/O latency rather than parsing. On a machine with 2,615 `.jsonl` files (about 41,000 entries) the first scan takes roughly **4 minutes**, and each later launch roughly **90 seconds**. The rings stay empty until it finishes — this is expected, not a hang.
+
+Parsed results are cached in `%LOCALAPPDATA%\PokeTokenBar\usage-cache.json`, so unchanged files are never re-parsed; the remaining time is spent checking every file for changes. Note that `--report` deliberately bypasses that cache and always pays the full cost, so the CLI is slower than the tray.
+
 ### Build from source
 
 ```bash
@@ -157,6 +161,8 @@ swift build                  # debug
 swift test                   # unit tests
 ./scripts/build-app.sh       # release → PokeTokenBar.app → /Applications
 ```
+
+**Windows.** Build with `swift build -c release`; the binary lands in `.build\out\Products\Release-windows-x86_64\PokeTokenBar.exe`. This needs the Swift toolchain for Windows plus the Visual Studio C++ build tools, and `swift build` must run from a shell where `vcvars64.bat` has been applied — otherwise the toolchain reports `could not find CLI tool 'link'`. `swift test` does not currently link on Windows (`undefined symbol: main`); the unit tests target macOS/Linux CI.
 
 ## Data sources
 
