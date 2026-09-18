@@ -122,8 +122,11 @@ enum LocalAdditionalUsageReader {
     typealias Object = [String: Any]
 
     static var defaultOpenCodeRoots: [URL] {
-        environmentPaths("OPENCODE_DATA_DIR")
-            ?? [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode")]
+        environmentPaths("OPENCODE_DATA_DIR") ?? UsageRoots.all(".local/share/opencode")
+    }
+
+    static var defaultHermesRoots: [URL] {
+        environmentPaths("HERMES_HOME") ?? UsageRoots.all(".hermes")
     }
 
     static func openCodeEntries(
@@ -151,8 +154,7 @@ enum LocalAdditionalUsageReader {
         modifiedSince: Date,
         roots: [URL]? = nil
     ) -> [LocalUsageReader.Entry] {
-        let sourceRoots = roots ?? environmentPaths("HERMES_HOME")
-            ?? [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".hermes")]
+        let sourceRoots = roots ?? defaultHermesRoots
         var seen = Set<String>()
         var entries: [LocalUsageReader.Entry] = []
         for root in sourceRoots {
@@ -192,7 +194,9 @@ enum LocalAdditionalUsageReader {
         if root.pathExtension == "db" { return root }
         let standard = root.appendingPathComponent("opencode.db")
         if FileManager.default.fileExists(atPath: standard.path) { return standard }
-        return (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))?
+        // Path-based: the URL variant returns zero entries for a WSL (UNC) root. See UsageRoots.isUNC.
+        return (try? FileManager.default.contentsOfDirectory(atPath: root.path))?
+            .map { root.appendingPathComponent($0) }
             .filter { url in
                 let name = url.lastPathComponent
                 guard name.hasPrefix("opencode-"), name.hasSuffix(".db") else { return false }

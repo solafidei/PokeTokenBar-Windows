@@ -140,6 +140,16 @@ To receive updates, make sure you are **a collaborator** on this repository (rea
 
 The Windows installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php) from `installer/PokeTokenBar.iss`.
 
+**WSL.** If you run Claude Code (or Codex, Gemini CLI, OpenCode, Hermes) *inside WSL*, your logs live in the Linux home, not `C:\Users\<you>`. The app detects this automatically — no configuration. On startup it lists your distributions (`wsl -l -q`, which does not start them) and adds each Linux home it finds, so usage from both Windows and WSL is counted together. Your Claude login is picked up the same way, so the official 5h/weekly limits work for a WSL-only setup too.
+
+Run `PokeTokenBar.exe --report` to see what was detected — the `wsl:` line lists the homes found. If detection misses an unusual setup, point it at the home directly:
+
+```
+setx PTB_WSL_HOME "\\wsl.localhost\Ubuntu\home\yourname"
+```
+
+Boxes without WSL are unaffected: no distributions are listed, nothing is launched, and behaviour is identical to before. One known gap — the **Codex** limit percentage still needs `codex` installed on the Windows side, because reading it runs the binary; Codex *token counts* from WSL work normally.
+
 ### Build from source
 
 ```bash
@@ -158,6 +168,7 @@ swift test                   # unit tests
 | `~/.local/share/opencode/opencode.db` | OpenCode daily/blocks/weekly/monthly | SQLite read-only; legacy `storage/message` JSON is also supported |
 | `~/.hermes/state.db` | Hermes Agent daily/blocks/weekly/monthly | SQLite read-only; session token totals and persisted cost |
 | Keychain → `oauth/usage` | Claude official 5h/weekly % | unofficial endpoint; single Keychain prompt, then cached |
+| WSL homes (`\\wsl.localhost\<distro>\home\<user>`) | all of the above, from inside WSL | Windows only; auto-detected and read alongside the Windows home. Override with `PTB_WSL_HOME` |
 | `codex app-server` | Codex official 5h/weekly % | account snapshot only; no model turn |
 | [PokéAPI](https://pokeapi.co/) | Pokémon species, evolution, sprites | runtime fetch; cached locally, never bundled |
 
